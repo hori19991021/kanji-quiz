@@ -1,22 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { initializeApp, getApps } from "firebase/app";
-import { getAuth, onAuthStateChanged, signInAnonymously } from "firebase/auth";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getFirestore,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-} from "firebase/firestore";
+
 
 const firebaseConfig = {
   apiKey: "AIzaSyBUIhfkQhtH6RsRbByK7BwNQo8AE0FE8",
@@ -31,14 +16,27 @@ const isFirebaseConfigured = !Object.values(firebaseConfig).some((value) =>
   String(value).includes("YOUR_")
 );
 
-const firebaseApp = isFirebaseConfigured
-  ? getApps().length > 0
-    ? getApps()[0]
-    : initializeApp(firebaseConfig)
-  : null;
+let firebaseApp: any = null;
+let auth: any = null;
+let db: any = null;
 
-const auth = firebaseApp ? getAuth(firebaseApp) : null;
-const db = firebaseApp ? getFirestore(firebaseApp) : null;
+async function initFirebase() {
+  if (typeof window === "undefined") return;
+
+  const appMod = await import("firebase/app");
+  const authMod = await import("firebase/auth");
+  const firestoreMod = await import("firebase/firestore");
+
+  firebaseApp =
+    appMod.getApps().length > 0
+      ? appMod.getApps()[0]
+      : appMod.initializeApp(firebaseConfig);
+
+  auth = authMod.getAuth(firebaseApp);
+  db = firestoreMod.getFirestore(firebaseApp);
+
+  return { appMod, authMod, firestoreMod };
+}
 
 function randomId(length = 6) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -118,214 +116,20 @@ function DrawingPad({
   const drawingRef = useRef(false);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const wrapper = wrapperRef.current;
-    if (!canvas || !wrapper) return;
+  let unsubscribe: (() => void) | undefined;
 
-    const resize = () => {
-      const rect = wrapper.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
-      const old = document.createElement("canvas");
-      old.width = canvas.width || 1;
-      old.height = canvas.height || 1;
-      const oldCtx = old.getContext("2d");
-      if (oldCtx) oldCtx.drawImage(canvas, 0, 0);
+  const run = async () => {
+    const mods = await initFirebase();
+    if (!mods || !auth) return;
 
-      canvas.width = Math.max(1, rect.width * ratio);
-      canvas.height = 260 * ratio;
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = "260px";
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.scale(ratio, ratio);
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, rect.width, 260);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = "black";
-      ctx.lineWidth = 8;
-      ctx.drawImage(old, 0, 0, rect.width, 260);
-      onChange(dataUrlFromCanvas(canvas));
-    };
-
-    resize();
-    window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
-  }, [onChange]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const rect = canvas.getBoundingClientRect();
-    if (!ctx) return;
-    ctx.fillStyle = "white";
-    ctx.fillRect(0, 0, rect.width, rect.height);
-    ctx.strokeStyle = "black";
-    ctx.lineWidth = 8;
-    onChange(dataUrlFromCanvas(canvas));
-  }, [resetKey, onChange]);
-
-  const getPoint = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    if ("touches" in e && e.touches[0]) {
-      return {
-        x: e.touches[0].clientX - rect.left,
-        y: e.touches[0].clientY - rect.top,
-      };
-    }
-    return {
-      x: (e as React.MouseEvent<HTMLCanvasElement>).clientX - rect.left,
-      y: (e as React.MouseEvent<HTMLCanvasElement>).clientY - rect.top,
-    };
-  };
-
-  const start = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!ctx) return;
-    const p = getPoint(e);
-    drawingRef.current = true;
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-  };
-
-  const move = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!drawingRef.current) return;
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!ctx || !canvas) return;
-    const p = getPoint(e);
-    ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-    onChange(dataUrlFromCanvas(canvas));
-  };
-
-  const end = () => {
-    drawingRef.current = false;
-  };
-
-  const clear = () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    const rect = canvas?.getBoundingClientRect();
-    if (!ctx || !rect || !canvas) return;
-    ctx.fillStyle = "white";
-    ctx.fillRect(0, 0, rect.width, rect.height);
-    ctx.strokeStyle = "black";
-    ctx.lineWidth = 8;
-    onChange(dataUrlFromCanvas(canvas));
-  };
-
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <strong>{title}</strong>
-        <button onClick={clear} style={styles.subtleButton}>消す</button>
-      </div>
-      <div ref={wrapperRef} style={styles.canvasWrap}>
-        <canvas
-          ref={canvasRef}
-          style={{ width: "100%", display: "block", touchAction: "none" }}
-          onMouseDown={start}
-          onMouseMove={move}
-          onMouseUp={end}
-          onMouseLeave={end}
-          onTouchStart={start}
-          onTouchMove={move}
-          onTouchEnd={end}
-        />
-      </div>
-    </div>
-  );
-}
-
-function ProblemCard({
-  problem,
-  onChoose,
-  revealResult,
-}: {
-  problem: Problem;
-  onChoose: (isCorrect: boolean) => void;
-  revealResult: boolean;
-}) {
-  const [selected, setSelected] = useState<"left" | "right" | null>(null);
-
-  const choose = (side: "left" | "right") => {
-    if (selected) return;
-    setSelected(side);
-    onChoose(side === problem.correctSide);
-  };
-
-  return (
-    <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-      {(["left", "right"] as const).map((side, idx) => {
-        const chosen = selected === side;
-        const correct = problem.correctSide === side;
-        return (
-          <button
-            key={side}
-            onClick={() => choose(side)}
-            style={{
-              ...styles.card,
-              cursor: "pointer",
-              border: chosen ? "2px solid #111827" : "1px solid #d1d5db",
-              textAlign: "left",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={styles.badge}>{idx === 0 ? "左" : "右"}</span>
-              {revealResult && correct && <strong>○</strong>}
-              {revealResult && chosen && !correct && <strong>×</strong>}
-            </div>
-            <div style={styles.imageBox}>
-              <img src={problem[side]} alt={side} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-            </div>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-export default function Page() {
-  const [authReady, setAuthReady] = useState(!isFirebaseConfigured);
-  const [authError, setAuthError] = useState("");
-  const [user, setUser] = useState<{ uid: string } | null>(null);
-  const [screen, setScreen] = useState<"top" | "room" | "play" | "gameover" | "clear">("top");
-  const [playerName, setPlayerName] = useState("");
-  const [currentRoomId, setCurrentRoomId] = useState("");
-  const [hostPasscodeInput, setHostPasscodeInput] = useState("");
-  const [role, setRole] = useState<"host" | "guest" | null>(null);
-  const [room, setRoom] = useState<RoomData | null>(null);
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [approvedProblems, setApprovedProblems] = useState<Problem[]>([]);
-  const [leftImage, setLeftImage] = useState("");
-  const [rightImage, setRightImage] = useState("");
-  const [correctSide, setCorrectSide] = useState<"left" | "right">("left");
-  const [submitMessage, setSubmitMessage] = useState("");
-  const [playCount, setPlayCount] = useState(10);
-  const [playSet, setPlaySet] = useState<Problem[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [resultState, setResultState] = useState<"correct" | "wrong" | null>(null);
-  const [solved, setSolved] = useState(0);
-  const [hostShareUrl, setHostShareUrl] = useState("");
-  const [guestShareUrl, setGuestShareUrl] = useState("");
-  const [drawResetKey, setDrawResetKey] = useState(0);
-
-  useEffect(() => {
-    if (!auth) return;
+    const { authMod } = mods;
 
     const timeout = setTimeout(() => {
       setAuthError("Firebase認証が完了しません。Firebase の Authentication で Anonymous が ON か確認してください。");
       setAuthReady(true);
     }, 8000);
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    unsubscribe = authMod.onAuthStateChanged(auth, async (currentUser: any) => {
       if (currentUser) {
         clearTimeout(timeout);
         setAuthError("");
@@ -334,19 +138,21 @@ export default function Page() {
         return;
       }
       try {
-        await signInAnonymously(auth);
+        await authMod.signInAnonymously(auth);
       } catch (error: any) {
         clearTimeout(timeout);
         setAuthError(`Firebase認証でエラー: ${error?.code || "unknown"}`);
         setAuthReady(true);
       }
     });
+  };
 
-    return () => {
-      clearTimeout(timeout);
-      unsubscribe();
-    };
-  }, []);
+  run();
+
+  return () => {
+    if (unsubscribe) unsubscribe();
+  };
+}, []);
 
   useEffect(() => {
     if (!db) return;
