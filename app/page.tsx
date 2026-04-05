@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, onAuthStateChanged, signInAnonymously } from "firebase/auth";
