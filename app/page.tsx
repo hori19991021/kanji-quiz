@@ -17,24 +17,7 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Separator } from "@/components/ui/separator";
-import { CheckCircle2, XCircle, Users, Pencil, PlayCircle, ShieldCheck, Send, Trash2, RotateCcw, Copy } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 
-/**
- * Firebase 本番版
- * 1. Firebase コンソールで Web アプリを追加
- * 2. 下の firebaseConfig を自分の値に置き換える
- * 3. Authentication で Anonymous を有効化
- * 4. Firestore Database を作成
- */
 const firebaseConfig = {
   apiKey: "AIzaSyBUIhfkQhtH6RsRbByK7BwNQo8AE0FE8",
   authDomain: "kanji-kuizu.firebaseapp.com",
@@ -62,7 +45,7 @@ function randomId(length = 6) {
   return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 }
 
-function normalizeName(name) {
+function normalizeName(name: string) {
   return name.trim();
 }
 
@@ -75,7 +58,7 @@ function getUrlParams() {
   };
 }
 
-function buildRoleUrl(role, roomId, passcode = "") {
+function buildRoleUrl(role: "host" | "guest", roomId: string, passcode = "") {
   const url = new URL(window.location.href);
   url.searchParams.set("mode", role);
   url.searchParams.set("room", roomId);
@@ -87,15 +70,52 @@ function buildRoleUrl(role, roomId, passcode = "") {
   return url.toString();
 }
 
-function dataUrlFromCanvas(canvas) {
+function dataUrlFromCanvas(canvas: HTMLCanvasElement) {
   return canvas.toDataURL("image/png");
 }
 
-function DrawingPad({ title, onChange, resetKey }) {
-  const canvasRef = useRef(null);
-  const wrapperRef = useRef(null);
+type Submission = {
+  id: string;
+  createdBy: string;
+  createdByUid?: string;
+  left: string;
+  right: string;
+  correctSide: "left" | "right";
+  status: "pending" | "approved" | "rejected";
+  createdAt?: unknown;
+};
+
+type Problem = {
+  id: string;
+  createdBy: string;
+  createdByUid?: string;
+  left: string;
+  right: string;
+  correctSide: "left" | "right";
+  approvedAt?: unknown;
+  playId?: string;
+};
+
+type RoomData = {
+  id: string;
+  roomId: string;
+  hostName: string;
+  hostUid: string;
+  hostPasscode: string;
+};
+
+function DrawingPad({
+  title,
+  onChange,
+  resetKey,
+}: {
+  title: string;
+  onChange: (value: string) => void;
+  resetKey: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const drawingRef = useRef(false);
-  const [hasDrawn, setHasDrawn] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -109,12 +129,12 @@ function DrawingPad({ title, onChange, resetKey }) {
       old.width = canvas.width || 1;
       old.height = canvas.height || 1;
       const oldCtx = old.getContext("2d");
-      oldCtx?.drawImage(canvas, 0, 0);
+      if (oldCtx) oldCtx.drawImage(canvas, 0, 0);
 
-      canvas.width = rect.width * ratio;
+      canvas.width = Math.max(1, rect.width * ratio);
       canvas.height = 260 * ratio;
       canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `260px`;
+      canvas.style.height = "260px";
 
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
@@ -126,7 +146,7 @@ function DrawingPad({ title, onChange, resetKey }) {
       ctx.strokeStyle = "black";
       ctx.lineWidth = 8;
       ctx.drawImage(old, 0, 0, rect.width, 260);
-      onChange?.(dataUrlFromCanvas(canvas));
+      onChange(dataUrlFromCanvas(canvas));
     };
 
     resize();
@@ -144,12 +164,11 @@ function DrawingPad({ title, onChange, resetKey }) {
     ctx.fillRect(0, 0, rect.width, rect.height);
     ctx.strokeStyle = "black";
     ctx.lineWidth = 8;
-    setHasDrawn(false);
-    onChange?.(dataUrlFromCanvas(canvas));
+    onChange(dataUrlFromCanvas(canvas));
   }, [resetKey, onChange]);
 
-  const getPoint = (e) => {
-    const canvas = canvasRef.current;
+  const getPoint = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     if ("touches" in e && e.touches[0]) {
       return {
@@ -158,12 +177,12 @@ function DrawingPad({ title, onChange, resetKey }) {
       };
     }
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: (e as React.MouseEvent<HTMLCanvasElement>).clientX - rect.left,
+      y: (e as React.MouseEvent<HTMLCanvasElement>).clientY - rect.top,
     };
   };
 
-  const start = (e) => {
+  const start = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
@@ -174,7 +193,7 @@ function DrawingPad({ title, onChange, resetKey }) {
     ctx.moveTo(p.x, p.y);
   };
 
-  const move = (e) => {
+  const move = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!drawingRef.current) return;
     e.preventDefault();
     const canvas = canvasRef.current;
@@ -183,8 +202,7 @@ function DrawingPad({ title, onChange, resetKey }) {
     const p = getPoint(e);
     ctx.lineTo(p.x, p.y);
     ctx.stroke();
-    setHasDrawn(true);
-    onChange?.(dataUrlFromCanvas(canvas));
+    onChange(dataUrlFromCanvas(canvas));
   };
 
   const end = () => {
@@ -200,22 +218,19 @@ function DrawingPad({ title, onChange, resetKey }) {
     ctx.fillRect(0, 0, rect.width, rect.height);
     ctx.strokeStyle = "black";
     ctx.lineWidth = 8;
-    setHasDrawn(false);
-    onChange?.(dataUrlFromCanvas(canvas));
+    onChange(dataUrlFromCanvas(canvas));
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label className="text-base font-semibold">{title}</Label>
-        <Button variant="outline" size="sm" onClick={clear}>
-          <RotateCcw className="mr-2 h-4 w-4" /> 消す
-        </Button>
+    <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <strong>{title}</strong>
+        <button onClick={clear} style={styles.subtleButton}>消す</button>
       </div>
-      <div ref={wrapperRef} className="rounded-2xl border bg-white shadow-sm overflow-hidden touch-none">
+      <div ref={wrapperRef} style={styles.canvasWrap}>
         <canvas
           ref={canvasRef}
-          className="block w-full touch-none"
+          style={{ width: "100%", display: "block", touchAction: "none" }}
           onMouseDown={start}
           onMouseMove={move}
           onMouseUp={end}
@@ -225,76 +240,78 @@ function DrawingPad({ title, onChange, resetKey }) {
           onTouchEnd={end}
         />
       </div>
-      <p className="text-sm text-muted-foreground">
-        {hasDrawn ? "書き込み済み" : "ここに漢字を書いてください"}
-      </p>
     </div>
   );
 }
 
-function ProblemCard({ problem, onChoose, revealResult }) {
-  const [selected, setSelected] = useState(null);
+function ProblemCard({
+  problem,
+  onChoose,
+  revealResult,
+}: {
+  problem: Problem;
+  onChoose: (isCorrect: boolean) => void;
+  revealResult: boolean;
+}) {
+  const [selected, setSelected] = useState<"left" | "right" | null>(null);
 
-  const choose = (side) => {
+  const choose = (side: "left" | "right") => {
     if (selected) return;
     setSelected(side);
     onChoose(side === problem.correctSide);
   };
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {["left", "right"].map((side, idx) => {
-        const image = problem[side];
+    <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+      {(["left", "right"] as const).map((side, idx) => {
         const chosen = selected === side;
         const correct = problem.correctSide === side;
-        const showCorrect = revealResult && correct;
-        const showWrong = revealResult && chosen && !correct;
-
         return (
-          <motion.button
+          <button
             key={side}
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.99 }}
-            className={`relative overflow-hidden rounded-2xl border bg-white p-3 shadow-sm transition ${
-              chosen ? "ring-2 ring-black" : ""
-            }`}
             onClick={() => choose(side)}
+            style={{
+              ...styles.card,
+              cursor: "pointer",
+              border: chosen ? "2px solid #111827" : "1px solid #d1d5db",
+              textAlign: "left",
+            }}
           >
-            <div className="mb-2 flex items-center justify-between">
-              <Badge variant="secondary">{idx === 0 ? "左" : "右"}</Badge>
-              {showCorrect && <CheckCircle2 className="h-6 w-6" />}
-              {showWrong && <XCircle className="h-6 w-6" />}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={styles.badge}>{idx === 0 ? "左" : "右"}</span>
+              {revealResult && correct && <strong>○</strong>}
+              {revealResult && chosen && !correct && <strong>×</strong>}
             </div>
-            <div className="aspect-square w-full overflow-hidden rounded-xl border bg-slate-50">
-              <img src={image} alt={`${idx === 0 ? "左" : "右"}の漢字`} className="h-full w-full object-contain" />
+            <div style={styles.imageBox}>
+              <img src={problem[side]} alt={side} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
-          </motion.button>
+          </button>
         );
       })}
     </div>
   );
 }
 
-export default function KanjiQuizGamePrototype() {
+export default function Page() {
   const [authReady, setAuthReady] = useState(!isFirebaseConfigured);
   const [authError, setAuthError] = useState("");
-  const [user, setUser] = useState(null);
-  const [screen, setScreen] = useState("top");
+  const [user, setUser] = useState<{ uid: string } | null>(null);
+  const [screen, setScreen] = useState<"top" | "room" | "play" | "gameover" | "clear">("top");
   const [playerName, setPlayerName] = useState("");
   const [currentRoomId, setCurrentRoomId] = useState("");
   const [hostPasscodeInput, setHostPasscodeInput] = useState("");
-  const [role, setRole] = useState(null);
-  const [room, setRoom] = useState(null);
-  const [submissions, setSubmissions] = useState([]);
-  const [approvedProblems, setApprovedProblems] = useState([]);
+  const [role, setRole] = useState<"host" | "guest" | null>(null);
+  const [room, setRoom] = useState<RoomData | null>(null);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [approvedProblems, setApprovedProblems] = useState<Problem[]>([]);
   const [leftImage, setLeftImage] = useState("");
   const [rightImage, setRightImage] = useState("");
-  const [correctSide, setCorrectSide] = useState("left");
+  const [correctSide, setCorrectSide] = useState<"left" | "right">("left");
   const [submitMessage, setSubmitMessage] = useState("");
   const [playCount, setPlayCount] = useState(10);
-  const [playSet, setPlaySet] = useState([]);
+  const [playSet, setPlaySet] = useState<Problem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [resultState, setResultState] = useState(null);
+  const [resultState, setResultState] = useState<"correct" | "wrong" | null>(null);
   const [solved, setSolved] = useState(0);
   const [hostShareUrl, setHostShareUrl] = useState("");
   const [guestShareUrl, setGuestShareUrl] = useState("");
@@ -304,7 +321,7 @@ export default function KanjiQuizGamePrototype() {
     if (!auth) return;
 
     const timeout = setTimeout(() => {
-      setAuthError("Firebase認証が完了しません。ChatGPTのプレビュー上では認証ドメイン制限で動かないことがあります。公開URLやローカル環境で開いて試してください。");
+      setAuthError("Firebase認証が完了しません。Firebase の Authentication で Anonymous が ON か確認してください。");
       setAuthReady(true);
     }, 8000);
 
@@ -312,21 +329,19 @@ export default function KanjiQuizGamePrototype() {
       if (currentUser) {
         clearTimeout(timeout);
         setAuthError("");
-        setUser(currentUser);
+        setUser({ uid: currentUser.uid });
         setAuthReady(true);
         return;
       }
       try {
         await signInAnonymously(auth);
-      } catch (error) {
-        console.error(error);
+      } catch (error: any) {
         clearTimeout(timeout);
-        setAuthError(
-          `Firebase認証でエラーが出ました: ${error?.code || "unknown"}。ChatGPTのプレビュー上では認証ドメイン制限で動かないことがあります。公開URLやローカル環境で試してください。`
-        );
+        setAuthError(`Firebase認証でエラー: ${error?.code || "unknown"}`);
         setAuthReady(true);
       }
     });
+
     return () => {
       clearTimeout(timeout);
       unsubscribe();
@@ -338,15 +353,14 @@ export default function KanjiQuizGamePrototype() {
     const { room: roomId, code, mode } = getUrlParams();
     if (!roomId || !mode) return;
 
-    const tryJoinFromUrl = async () => {
+    const run = async () => {
       const snap = await getDoc(doc(db, "rooms", roomId));
       if (!snap.exists()) return;
-      const data = snap.data();
+      const data = snap.data() as RoomData;
       setCurrentRoomId(roomId);
       setHostPasscodeInput(code || "");
       setHostShareUrl(buildRoleUrl("host", roomId, data.hostPasscode));
       setGuestShareUrl(buildRoleUrl("guest", roomId));
-
       if (mode === "host" && code && code === data.hostPasscode) {
         setRole("host");
         setScreen("room");
@@ -356,41 +370,35 @@ export default function KanjiQuizGamePrototype() {
       }
     };
 
-    tryJoinFromUrl();
+    run();
   }, []);
 
   useEffect(() => {
     if (!db || !currentRoomId || screen !== "room") return;
 
     const roomRef = doc(db, "rooms", currentRoomId);
-    const unsubscribeRoom = onSnapshot(roomRef, (snap) => {
+    const unsubRoom = onSnapshot(roomRef, (snap) => {
       if (!snap.exists()) {
         setRoom(null);
         return;
       }
-      setRoom({ id: snap.id, ...snap.data() });
+      setRoom({ id: snap.id, ...(snap.data() as Omit<RoomData, "id">) });
     });
 
-    const submissionsRef = query(
-      collection(db, "rooms", currentRoomId, "submissions"),
-      orderBy("createdAt", "desc")
-    );
-    const unsubscribeSubmissions = onSnapshot(submissionsRef, (snap) => {
-      setSubmissions(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    const submissionsRef = query(collection(db, "rooms", currentRoomId, "submissions"), orderBy("createdAt", "desc"));
+    const unsubSubmissions = onSnapshot(submissionsRef, (snap) => {
+      setSubmissions(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Submission, "id">) })));
     });
 
-    const problemsRef = query(
-      collection(db, "rooms", currentRoomId, "problems"),
-      orderBy("approvedAt", "desc")
-    );
-    const unsubscribeProblems = onSnapshot(problemsRef, (snap) => {
-      setApprovedProblems(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    const problemsRef = query(collection(db, "rooms", currentRoomId, "problems"), orderBy("approvedAt", "desc"));
+    const unsubProblems = onSnapshot(problemsRef, (snap) => {
+      setApprovedProblems(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Problem, "id">) })));
     });
 
     return () => {
-      unsubscribeRoom();
-      unsubscribeSubmissions();
-      unsubscribeProblems();
+      unsubRoom();
+      unsubSubmissions();
+      unsubProblems();
     };
   }, [currentRoomId, screen]);
 
@@ -429,7 +437,7 @@ export default function KanjiQuizGamePrototype() {
       return;
     }
 
-    const data = snap.data();
+    const data = snap.data() as RoomData;
     const normalizedPasscode = hostPasscodeInput.trim().toUpperCase();
     const isHost = normalizedPasscode !== "" && normalizedPasscode === data.hostPasscode;
 
@@ -438,11 +446,7 @@ export default function KanjiQuizGamePrototype() {
     setGuestShareUrl(buildRoleUrl("guest", roomId));
     setRole(isHost ? "host" : "guest");
     setScreen("room");
-    window.history.replaceState(
-      {},
-      "",
-      isHost ? buildRoleUrl("host", roomId, data.hostPasscode) : buildRoleUrl("guest", roomId)
-    );
+    window.history.replaceState({}, "", isHost ? buildRoleUrl("host", roomId, data.hostPasscode) : buildRoleUrl("guest", roomId));
   };
 
   const submitProblem = async () => {
@@ -470,13 +474,11 @@ export default function KanjiQuizGamePrototype() {
     setTimeout(() => setSubmitMessage(""), 2500);
   };
 
-  const approveSubmission = async (submission) => {
+  const approveSubmission = async (submission: Submission) => {
     if (!db) return;
-
     await updateDoc(doc(db, "rooms", currentRoomId, "submissions", submission.id), {
       status: "approved",
     });
-
     await setDoc(doc(db, "rooms", currentRoomId, "problems", submission.id), {
       createdBy: submission.createdBy,
       createdByUid: submission.createdByUid || "",
@@ -487,46 +489,33 @@ export default function KanjiQuizGamePrototype() {
     });
   };
 
-  const rejectSubmission = async (submissionId) => {
+  const rejectSubmission = async (submissionId: string) => {
     if (!db) return;
     await updateDoc(doc(db, "rooms", currentRoomId, "submissions", submissionId), {
       status: "rejected",
     });
   };
 
-  const deleteApproved = async (problemId) => {
+  const deleteApproved = async (problemId: string) => {
     if (!db) return;
     await deleteDoc(doc(db, "rooms", currentRoomId, "problems", problemId));
   };
 
-  const startGame = (count) => {
+  const startGame = (count: number) => {
     if (!approvedProblems.length) {
       alert("承認済みの問題がまだありません。");
       return;
     }
-
     const pool = [...approvedProblems];
-    const picks = [];
+    const picks: Problem[] = [];
     while (picks.length < count) {
       const item = pool[Math.floor(Math.random() * pool.length)];
       const shouldSwap = Math.random() < 0.5;
       const left = shouldSwap ? item.right : item.left;
       const right = shouldSwap ? item.left : item.right;
-      const swappedCorrectSide = shouldSwap
-        ? item.correctSide === "left"
-          ? "right"
-          : "left"
-        : item.correctSide;
-
-      picks.push({
-        ...item,
-        left,
-        right,
-        correctSide: swappedCorrectSide,
-        playId: `${item.id}-${picks.length}-${Math.random()}`,
-      });
+      const swappedCorrectSide = shouldSwap ? (item.correctSide === "left" ? "right" : "left") : item.correctSide;
+      picks.push({ ...item, left, right, correctSide: swappedCorrectSide, playId: `${item.id}-${picks.length}-${Math.random()}` });
     }
-
     setPlayCount(count);
     setPlaySet(picks);
     setCurrentIndex(0);
@@ -537,7 +526,7 @@ export default function KanjiQuizGamePrototype() {
 
   const currentProblem = playSet[currentIndex];
 
-  const handleChoose = (isCorrect) => {
+  const handleChoose = (isCorrect: boolean) => {
     setResultState(isCorrect ? "correct" : "wrong");
     if (isCorrect) {
       const nextSolved = solved + 1;
@@ -580,7 +569,7 @@ export default function KanjiQuizGamePrototype() {
     [submissions]
   );
 
-  const copyText = async (text) => {
+  const copyText = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
       alert("コピーしました。");
@@ -589,61 +578,16 @@ export default function KanjiQuizGamePrototype() {
     }
   };
 
-  if (!isFirebaseConfigured) {
-    return (
-      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-        <div className="mx-auto max-w-4xl">
-          <Card className="rounded-3xl shadow-xl">
-            <CardHeader>
-              <CardTitle>Firebase 設定を入れると本番版になります</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm leading-7">
-              <p>コード先頭の <code>firebaseConfig</code> を、自分の Firebase コンソールで取得した値に置き換えてください。</p>
-              <div className="rounded-2xl border bg-white p-4 font-mono text-xs overflow-auto">
-                {`const firebaseConfig = {
-  apiKey: "...",
-  authDomain: "...",
-  projectId: "...",
-  storageBucket: "...",
-  messagingSenderId: "...",
-  appId: "...",
-};`}
-              </div>
-              <p>そのうえで、Authentication の Anonymous を ON、Firestore Database を作成すると、別端末どうしで同じ部屋を共有できます。</p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
-  }
-
   if (!authReady) {
-    return (
-      <div className="min-h-screen grid place-items-center bg-slate-50 p-6">
-        <Card className="rounded-3xl shadow-xl">
-          <CardContent className="p-8 text-center">Firebase に接続しています...</CardContent>
-        </Card>
-      </div>
-    );
+    return <div style={styles.centerScreen}>Firebase に接続しています...</div>;
   }
 
   if (authError) {
     return (
-      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-        <div className="mx-auto max-w-3xl">
-          <Card className="rounded-3xl shadow-xl">
-            <CardHeader>
-              <CardTitle>Firebase認証で止まっています</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm leading-7">
-              <p>{authError}</p>
-              <div className="rounded-2xl border bg-white p-4">
-                <p className="font-medium">次のどちらかで進めてください</p>
-                <p>1. Vercelなどに公開して、そのURLで開く</p>
-                <p>2. 自分のPCでローカル起動してブラウザで開く</p>
-              </div>
-            </CardContent>
-          </Card>
+      <div style={styles.page}>
+        <div style={styles.panel}>
+          <h2>Firebase認証で止まっています</h2>
+          <p>{authError}</p>
         </div>
       </div>
     );
@@ -651,260 +595,162 @@ export default function KanjiQuizGamePrototype() {
 
   if (screen === "top") {
     return (
-      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-        <div className="mx-auto max-w-5xl space-y-6">
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-            <Card className="rounded-3xl border-0 shadow-xl">
-              <CardContent className="grid gap-6 p-6 md:grid-cols-[1.2fr_0.8fr] md:p-10">
-                <div className="space-y-4">
-                  <Badge className="rounded-full px-3 py-1 text-sm">漢字クイズゲーム Firebase版</Badge>
-                  <h1 className="text-3xl font-bold tracking-tight md:text-5xl">みんなで作って、みんなで解く。</h1>
-                  <p className="text-base text-muted-foreground md:text-lg">
-                    ホストとゲストが別端末で同じ部屋に入り、問題の投稿・承認・出題がリアルタイムで同期します。
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    ホスト用URLとゲスト用URLを分けています。ゲストは承認済み問題一覧を見られません。
-                  </p>
-                </div>
-
-                <Card className="rounded-3xl shadow-md">
-                  <CardHeader>
-                    <CardTitle>はじめる</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-5">
-                    <div className="space-y-2">
-                      <Label>名前</Label>
-                      <Input value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="例：りんたろう" />
-                    </div>
-
-                    <Separator />
-
-                    <div className="space-y-3">
-                      <Button className="w-full rounded-2xl" size="lg" onClick={createRoom}>
-                        <Users className="mr-2 h-5 w-5" />
-                        ホストとして部屋を作る
-                      </Button>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>部屋IDを入力して参加</Label>
-                      <Input
-                        value={currentRoomId}
-                        onChange={(e) => setCurrentRoomId(e.target.value.toUpperCase())}
-                        placeholder="例：AB12CD"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>ホスト用パスコード（ホスト復帰時のみ）</Label>
-                      <Input
-                        value={hostPasscodeInput}
-                        onChange={(e) => setHostPasscodeInput(e.target.value.toUpperCase())}
-                        placeholder="ゲストは空欄のままでOK"
-                      />
-                      <Button variant="secondary" className="w-full rounded-2xl" onClick={joinRoom}>
-                        入る
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </CardContent>
-            </Card>
-          </motion.div>
+      <div style={styles.page}>
+        <div style={styles.heroWrap}>
+          <div style={styles.heroText}>
+            <div style={styles.badge}>漢字クイズゲーム Firebase版</div>
+            <h1 style={{ margin: 0, fontSize: 44 }}>みんなで作って、みんなで解く。</h1>
+            <p>ホストとゲストが別端末で同じ部屋に入り、問題の投稿・承認・出題を共有できます。</p>
+          </div>
+          <div style={styles.panel}>
+            <h2 style={{ marginTop: 0 }}>はじめる</h2>
+            <div style={styles.field}>
+              <label>名前</label>
+              <input style={styles.input} value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="例：りんたろう" />
+            </div>
+            <button style={styles.primaryButton} onClick={createRoom}>ホストとして部屋を作る</button>
+            <div style={styles.separator} />
+            <div style={styles.field}>
+              <label>部屋ID</label>
+              <input style={styles.input} value={currentRoomId} onChange={(e) => setCurrentRoomId(e.target.value.toUpperCase())} placeholder="例：AB12CD" />
+            </div>
+            <div style={styles.field}>
+              <label>ホスト用パスコード（ホスト復帰時のみ）</label>
+              <input style={styles.input} value={hostPasscodeInput} onChange={(e) => setHostPasscodeInput(e.target.value.toUpperCase())} placeholder="ゲストは空欄でOK" />
+            </div>
+            <button style={styles.secondaryButton} onClick={joinRoom}>入る</button>
+          </div>
         </div>
       </div>
     );
   }
 
   if (!room) {
-    return (
-      <div className="min-h-screen grid place-items-center p-6 bg-slate-50">
-        <Card className="max-w-md rounded-3xl">
-          <CardContent className="space-y-4 p-6 text-center">
-            <p>部屋が見つかりませんでした。</p>
-            <Button onClick={() => setScreen("top")}>トップへ戻る</Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return <div style={styles.centerScreen}>部屋が見つかりませんでした。</div>;
   }
 
   if (screen === "room") {
     return (
-      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-        <div className="mx-auto max-w-6xl space-y-6">
-          <Card className="rounded-3xl shadow-lg">
-            <CardContent className="flex flex-col gap-4 p-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <div className="mb-2 flex items-center gap-2">
-                    <Badge variant="outline">部屋ID: {room.roomId}</Badge>
-                    <Badge>{role === "host" ? "ホスト" : "ゲスト"}</Badge>
-                  </div>
-                  <h2 className="text-2xl font-bold">{room.hostName} の部屋</h2>
-                  <p className="text-muted-foreground">承認済み問題 {approvedProblems.length} 件 / 申請中 {pendingSubmissions.length} 件</p>
-                </div>
-                <Button variant="outline" className="rounded-2xl" onClick={leaveRoom}>
-                  部屋を出る
-                </Button>
+      <div style={styles.page}>
+        <div style={{ ...styles.panel, marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                <span style={styles.badge}>部屋ID: {room.roomId}</span>
+                <span style={styles.badge}>{role === "host" ? "ホスト" : "ゲスト"}</span>
               </div>
+              <h2 style={{ margin: 0 }}>{room.hostName} の部屋</h2>
+              <p>承認済み問題 {approvedProblems.length} 件 / 申請中 {pendingSubmissions.length} 件</p>
+            </div>
+            <button style={styles.subtleButton} onClick={leaveRoom}>部屋を出る</button>
+          </div>
 
-              {role === "host" && (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl border bg-white p-3">
-                    <p className="mb-1 text-sm font-medium">ホスト用URL</p>
-                    <div className="flex gap-2">
-                      <Input readOnly value={hostShareUrl || buildRoleUrl("host", room.roomId, room.hostPasscode)} />
-                      <Button variant="outline" onClick={() => copyText(hostShareUrl || buildRoleUrl("host", room.roomId, room.hostPasscode))}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border bg-white p-3">
-                    <p className="mb-1 text-sm font-medium">ゲスト用URL</p>
-                    <div className="flex gap-2">
-                      <Input readOnly value={guestShareUrl || buildRoleUrl("guest", room.roomId)} />
-                      <Button variant="outline" onClick={() => copyText(guestShareUrl || buildRoleUrl("guest", room.roomId))}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Tabs defaultValue="create" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-2 rounded-2xl h-12">
-              <TabsTrigger value="create" className="rounded-xl">
-                <Pencil className="mr-2 h-4 w-4" /> 問題を作る
-              </TabsTrigger>
-              <TabsTrigger value="solve" className="rounded-xl">
-                <PlayCircle className="mr-2 h-4 w-4" /> 問題を解く
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="create" className="space-y-6">
-              <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-                <Card className="rounded-3xl shadow-md">
-                  <CardHeader>
-                    <CardTitle>問題を作る</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="grid gap-6 lg:grid-cols-2">
-                      <DrawingPad title="正解の漢字" onChange={setLeftImage} resetKey={drawResetKey} />
-                      <DrawingPad title="間違いの漢字" onChange={setRightImage} resetKey={drawResetKey} />
-                    </div>
-
-                    <div className="space-y-3 rounded-2xl border p-4">
-                      <Label className="text-base font-semibold">どちらが正解かを指定</Label>
-                      <RadioGroup value={correctSide} onValueChange={setCorrectSide} className="flex gap-6">
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="left" id="left" />
-                          <Label htmlFor="left">左が正解</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="right" id="right" />
-                          <Label htmlFor="right">右が正解</Label>
-                        </div>
-                      </RadioGroup>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      <Button className="rounded-2xl" onClick={submitProblem}>
-                        <Send className="mr-2 h-4 w-4" /> 問題を送信する
-                      </Button>
-                      {submitMessage && <span className="text-sm text-muted-foreground">{submitMessage}</span>}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <div className="space-y-6">
-                  {role === "host" && (
-                    <Card className="rounded-3xl shadow-md">
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <ShieldCheck className="h-5 w-5" /> 申請された問題の承認
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        {pendingSubmissions.length === 0 && <p className="text-sm text-muted-foreground">まだ申請はありません。</p>}
-                        {pendingSubmissions.map((submission) => (
-                          <div key={submission.id} className="space-y-3 rounded-2xl border p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div>
-                                <p className="font-medium">投稿者: {submission.createdBy}</p>
-                                <p className="text-sm text-muted-foreground">正解: {submission.correctSide === "left" ? "左" : "右"}</p>
-                              </div>
-                              <Badge>申請中</Badge>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                              <img src={submission.left} alt="左" className="aspect-square rounded-xl border bg-white object-contain" />
-                              <img src={submission.right} alt="右" className="aspect-square rounded-xl border bg-white object-contain" />
-                            </div>
-                            <div className="flex gap-2">
-                              <Button className="rounded-2xl" onClick={() => approveSubmission(submission)}>
-                                許可
-                              </Button>
-                              <Button variant="destructive" className="rounded-2xl" onClick={() => rejectSubmission(submission.id)}>
-                                否認
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  {role === "host" && (
-                    <Card className="rounded-3xl shadow-md">
-                      <CardHeader>
-                        <CardTitle>承認済みの問題</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        {approvedProblems.length === 0 && <p className="text-sm text-muted-foreground">まだ承認済み問題はありません。</p>}
-                        {approvedProblems.map((problem) => (
-                          <div key={problem.id} className="rounded-2xl border p-3">
-                            <div className="mb-3 flex items-center justify-between">
-                              <div>
-                                <p className="font-medium">作成者: {problem.createdBy}</p>
-                                <p className="text-sm text-muted-foreground">正解: {problem.correctSide === "left" ? "左" : "右"}</p>
-                              </div>
-                              <Button variant="outline" size="sm" onClick={() => deleteApproved(problem.id)}>
-                                <Trash2 className="mr-2 h-4 w-4" /> 削除
-                              </Button>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                              <img src={problem.left} alt="左" className="aspect-square rounded-xl border bg-white object-contain" />
-                              <img src={problem.right} alt="右" className="aspect-square rounded-xl border bg-white object-contain" />
-                            </div>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  )}
+          {role === "host" && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginTop: 16 }}>
+              <div style={styles.box}>
+                <div style={{ marginBottom: 8, fontWeight: 700 }}>ホスト用URL</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input style={styles.input} readOnly value={hostShareUrl || buildRoleUrl("host", room.roomId, room.hostPasscode)} />
+                  <button style={styles.subtleButton} onClick={() => copyText(hostShareUrl || buildRoleUrl("host", room.roomId, room.hostPasscode))}>コピー</button>
                 </div>
               </div>
-            </TabsContent>
+              <div style={styles.box}>
+                <div style={{ marginBottom: 8, fontWeight: 700 }}>ゲスト用URL</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input style={styles.input} readOnly value={guestShareUrl || buildRoleUrl("guest", room.roomId)} />
+                  <button style={styles.subtleButton} onClick={() => copyText(guestShareUrl || buildRoleUrl("guest", room.roomId))}>コピー</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
-            <TabsContent value="solve">
-              <Card className="rounded-3xl shadow-md">
-                <CardHeader>
-                  <CardTitle>問題を解く</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <p className="text-muted-foreground">10問・30問・50問から選択します。間違えるとその時点で終了です。</p>
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    {[10, 30, 50].map((count) => (
-                      <Button key={count} className="h-16 rounded-2xl text-lg" onClick={() => startGame(count)}>
-                        {count}問
-                      </Button>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <button style={styles.tabButton} onClick={() => setScreen("room")}>問題を作る / 解く</button>
+        </div>
+
+        <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)" }}>
+          <div style={styles.panel}>
+            <h3>問題を作る</h3>
+            <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+              <DrawingPad title="正解の漢字" onChange={setLeftImage} resetKey={drawResetKey} />
+              <DrawingPad title="間違いの漢字" onChange={setRightImage} resetKey={drawResetKey} />
+            </div>
+
+            <div style={{ ...styles.box, marginTop: 16 }}>
+              <strong>どちらが正解かを指定</strong>
+              <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+                <label><input type="radio" checked={correctSide === "left"} onChange={() => setCorrectSide("left")} /> 左が正解</label>
+                <label><input type="radio" checked={correctSide === "right"} onChange={() => setCorrectSide("right")} /> 右が正解</label>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 16 }}>
+              <button style={styles.primaryButton} onClick={submitProblem}>問題を送信する</button>
+              {submitMessage && <span>{submitMessage}</span>}
+            </div>
+
+            <div style={{ ...styles.box, marginTop: 24 }}>
+              <h3>問題を解く</h3>
+              <p>10問・30問・50問から選択します。間違えるとその時点で終了です。</p>
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                {[10, 30, 50].map((count) => (
+                  <button key={count} style={styles.primaryButton} onClick={() => startGame(count)}>{count}問</button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 16 }}>
+            {role === "host" && (
+              <div style={styles.panel}>
+                <h3>申請された問題の承認</h3>
+                {pendingSubmissions.length === 0 && <p>まだ申請はありません。</p>}
+                <div style={{ display: "grid", gap: 12 }}>
+                  {pendingSubmissions.map((submission) => (
+                    <div key={submission.id} style={styles.box}>
+                      <div style={{ marginBottom: 8 }}>
+                        <strong>投稿者: {submission.createdBy}</strong><br />
+                        <span>正解: {submission.correctSide === "left" ? "左" : "右"}</span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <img src={submission.left} alt="左" style={styles.thumb} />
+                        <img src={submission.right} alt="右" style={styles.thumb} />
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                        <button style={styles.primaryButton} onClick={() => approveSubmission(submission)}>許可</button>
+                        <button style={styles.dangerButton} onClick={() => rejectSubmission(submission.id)}>否認</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {role === "host" && (
+              <div style={styles.panel}>
+                <h3>承認済みの問題</h3>
+                {approvedProblems.length === 0 && <p>まだ承認済み問題はありません。</p>}
+                <div style={{ display: "grid", gap: 12 }}>
+                  {approvedProblems.map((problem) => (
+                    <div key={problem.id} style={styles.box}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                        <div>
+                          <strong>作成者: {problem.createdBy}</strong><br />
+                          <span>正解: {problem.correctSide === "left" ? "左" : "右"}</span>
+                        </div>
+                        <button style={styles.subtleButton} onClick={() => deleteApproved(problem.id)}>削除</button>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <img src={problem.left} alt="左" style={styles.thumb} />
+                        <img src={problem.right} alt="右" style={styles.thumb} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -912,47 +758,31 @@ export default function KanjiQuizGamePrototype() {
 
   if (screen === "play" && currentProblem) {
     return (
-      <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-        <div className="mx-auto max-w-5xl space-y-6">
-          <Card className="rounded-3xl shadow-lg">
-            <CardContent className="flex flex-col gap-3 p-6 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">{playCount}問モード</p>
-                <h2 className="text-2xl font-bold">第 {currentIndex + 1} 問</h2>
-              </div>
-              <div className="flex gap-2">
-                <Badge variant="secondary">正解数 {solved}</Badge>
-                <Badge variant="outline">残り {playSet.length - currentIndex}</Badge>
-              </div>
-            </CardContent>
-          </Card>
+      <div style={styles.page}>
+        <div style={styles.panel}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            <div>
+              <div>{playCount}問モード</div>
+              <h2 style={{ margin: 0 }}>第 {currentIndex + 1} 問</h2>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <span style={styles.badge}>正解数 {solved}</span>
+              <span style={styles.badge}>残り {playSet.length - currentIndex}</span>
+            </div>
+          </div>
 
-          <Card className="rounded-3xl shadow-md">
-            <CardContent className="space-y-6 p-6">
-              <div className="space-y-2 text-center">
-                <h3 className="text-xl font-semibold">正しい漢字をえらんでください</h3>
-                <p className="text-sm text-muted-foreground">問題作成者: {currentProblem.createdBy}</p>
+          <div style={styles.box}>
+            <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <h3>正しい漢字をえらんでください</h3>
+              <p>問題作成者: {currentProblem.createdBy}</p>
+            </div>
+            <ProblemCard key={currentProblem.playId} problem={currentProblem} onChoose={handleChoose} revealResult={!!resultState} />
+            {resultState && (
+              <div style={{ textAlign: "center", marginTop: 16, fontSize: 24, fontWeight: 700 }}>
+                {resultState === "correct" ? "○ 正解" : "× 不正解"}
               </div>
-              <ProblemCard key={currentProblem.playId} problem={currentProblem} onChoose={handleChoose} revealResult={!!resultState} />
-              <AnimatePresence>
-                {resultState && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="text-center"
-                  >
-                    <div className={`inline-flex items-center gap-2 rounded-full px-5 py-3 text-xl font-bold ${
-                      resultState === "correct" ? "bg-emerald-100" : "bg-rose-100"
-                    }`}>
-                      {resultState === "correct" ? <CheckCircle2 /> : <XCircle />}
-                      {resultState === "correct" ? "○ 正解" : "× 不正解"}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </CardContent>
-          </Card>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -960,39 +790,167 @@ export default function KanjiQuizGamePrototype() {
 
   if (screen === "gameover") {
     return (
-      <div className="min-h-screen grid place-items-center bg-slate-50 p-4">
-        <Card className="w-full max-w-xl rounded-3xl shadow-xl">
-          <CardContent className="space-y-5 p-8 text-center">
-            <XCircle className="mx-auto h-16 w-16" />
-            <h2 className="text-3xl font-bold">ゲーム終了</h2>
-            <p className="text-lg">解けた問題数: <span className="font-bold">{solved}</span></p>
-            <div className="flex justify-center gap-3">
-              <Button className="rounded-2xl" onClick={() => setScreen("room")}>部屋へ戻る</Button>
-              <Button variant="outline" className="rounded-2xl" onClick={() => startGame(playCount)}>もう一度挑戦</Button>
-            </div>
-          </CardContent>
-        </Card>
+      <div style={styles.centerScreen}>
+        <div style={styles.panel}>
+          <h2>ゲーム終了</h2>
+          <p>解けた問題数: {solved}</p>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button style={styles.primaryButton} onClick={() => setScreen("room")}>部屋へ戻る</button>
+            <button style={styles.subtleButton} onClick={() => startGame(playCount)}>もう一度挑戦</button>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (screen === "clear") {
     return (
-      <div className="min-h-screen grid place-items-center bg-slate-50 p-4">
-        <Card className="w-full max-w-xl rounded-3xl shadow-xl">
-          <CardContent className="space-y-5 p-8 text-center">
-            <CheckCircle2 className="mx-auto h-16 w-16" />
-            <h2 className="text-3xl font-bold">クリア！</h2>
-            <p className="text-lg"><span className="font-bold">{playCount}問</span> すべて正解しました。</p>
-            <div className="flex justify-center gap-3">
-              <Button className="rounded-2xl" onClick={() => setScreen("room")}>部屋へ戻る</Button>
-              <Button variant="outline" className="rounded-2xl" onClick={() => startGame(playCount)}>もう一度遊ぶ</Button>
-            </div>
-          </CardContent>
-        </Card>
+      <div style={styles.centerScreen}>
+        <div style={styles.panel}>
+          <h2>クリア！</h2>
+          <p>{playCount}問すべて正解しました。</p>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button style={styles.primaryButton} onClick={() => setScreen("room")}>部屋へ戻る</button>
+            <button style={styles.subtleButton} onClick={() => startGame(playCount)}>もう一度遊ぶ</button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return null;
 }
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: "100vh",
+    background: "#f8fafc",
+    padding: 24,
+    fontFamily: "Arial, sans-serif",
+    color: "#111827",
+  },
+  centerScreen: {
+    minHeight: "100vh",
+    display: "grid",
+    placeItems: "center",
+    background: "#f8fafc",
+    padding: 24,
+    fontFamily: "Arial, sans-serif",
+  },
+  heroWrap: {
+    maxWidth: 1200,
+    margin: "0 auto",
+    display: "grid",
+    gap: 24,
+    gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)",
+  },
+  heroText: {
+    background: "white",
+    borderRadius: 24,
+    padding: 32,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+    display: "grid",
+    gap: 16,
+  },
+  panel: {
+    background: "white",
+    borderRadius: 24,
+    padding: 24,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+  },
+  box: {
+    border: "1px solid #d1d5db",
+    borderRadius: 16,
+    padding: 16,
+    background: "#fff",
+  },
+  badge: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "#e5e7eb",
+    fontSize: 14,
+  },
+  field: {
+    display: "grid",
+    gap: 6,
+    marginBottom: 12,
+  },
+  input: {
+    width: "100%",
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: "1px solid #cbd5e1",
+    fontSize: 16,
+    boxSizing: "border-box",
+  },
+  primaryButton: {
+    padding: "12px 16px",
+    borderRadius: 14,
+    border: "none",
+    background: "#111827",
+    color: "white",
+    fontSize: 16,
+    cursor: "pointer",
+  },
+  secondaryButton: {
+    padding: "12px 16px",
+    borderRadius: 14,
+    border: "none",
+    background: "#475569",
+    color: "white",
+    fontSize: 16,
+    cursor: "pointer",
+    width: "100%",
+  },
+  subtleButton: {
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid #cbd5e1",
+    background: "white",
+    cursor: "pointer",
+  },
+  dangerButton: {
+    padding: "12px 16px",
+    borderRadius: 14,
+    border: "none",
+    background: "#dc2626",
+    color: "white",
+    fontSize: 16,
+    cursor: "pointer",
+  },
+  separator: {
+    height: 1,
+    background: "#e5e7eb",
+    margin: "16px 0",
+  },
+  canvasWrap: {
+    border: "1px solid #d1d5db",
+    borderRadius: 16,
+    overflow: "hidden",
+    background: "white",
+  },
+  imageBox: {
+    width: "100%",
+    aspectRatio: "1 / 1",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    overflow: "hidden",
+    background: "#f8fafc",
+  },
+  thumb: {
+    width: "100%",
+    aspectRatio: "1 / 1",
+    objectFit: "contain",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    background: "#f8fafc",
+  },
+  tabButton: {
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid #cbd5e1",
+    background: "white",
+    cursor: "pointer",
+  },
+};
